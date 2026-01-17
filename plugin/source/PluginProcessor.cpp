@@ -1,5 +1,6 @@
-#include "HarmonicExplorer/PluginProcessor.h"
-#include "HarmonicExplorer/PluginEditor.h"
+#include "OpenLooper2/PluginProcessor.h"
+#include "OpenLooper2/PluginEditor.h"
+#include "OpenLooper2/Looper.h"
 
 //==============================================================================
 AudioPluginAudioProcessor::AudioPluginAudioProcessor()
@@ -10,8 +11,9 @@ AudioPluginAudioProcessor::AudioPluginAudioProcessor()
                       #endif
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
-                       ), 
-        synthAudioSource  (keyboardState)
+                       ),
+       looper(std::make_unique<OpenLooper2::Looper>()),
+       apvts(*this, nullptr, "Parameters", OpenLooper2::Looper::createParameterLayout())
 {
 }
 
@@ -88,12 +90,15 @@ void AudioPluginAudioProcessor::changeProgramName (int index, const juce::String
 //==============================================================================
 void AudioPluginAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    synthAudioSource.prepareToPlay(samplesPerBlock, sampleRate);
+    // Initialize the looper with audio specifications
+    const int numChannels = juce::jmax(getTotalNumInputChannels(), getTotalNumOutputChannels());
+    looper->initialize(sampleRate, samplesPerBlock, numChannels);
 }
 
 void AudioPluginAudioProcessor::releaseResources()
 {
-    synthAudioSource.releaseResources();
+    // When playback stops, you can use this as an opportunity to free up any
+    // spare memory, etc.
 }
 
 bool AudioPluginAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -129,32 +134,12 @@ void AudioPluginAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
 
-
-    // In case we have more outputs than inputs, this code clears any output
-    // channels that didn't contain input data, (because these aren't
-    // guaranteed to be empty - they may contain garbage).
-    // This is here to avoid people getting screaming feedback
-    // when they first compile a plugin, but obviously you don't need to keep
-    // this code if your algorithm always overwrites all the output channels.
+    // Clear any output channels that don't contain input data
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear (i, 0, buffer.getNumSamples());
 
-    // This is the place where you'd normally do the guts of your plugin's
-    // audio processing...
-    // Make sure to reset the state if your inner loop is processing
-    // the samples and the outer loop is handling the channels.
-    // Alternatively, you can process the samples with the channels
-    // interleaved by keeping the same state.
-
-    juce::AudioSourceChannelInfo bufferToFill(&buffer, 0, buffer.getNumSamples());
-    synthAudioSource.getNextAudioBlock(bufferToFill);
-
-    // for (int channel = 0; channel < totalNumInputChannels; ++channel)
-    // {
-    //     auto* channelData = buffer.getWritePointer (channel);
-    //     juce::ignoreUnused (channelData);
-    //     // ..do something to the data...
-    // }
+    // Process audio through the looper
+    looper->processBlock(buffer, apvts);
 }
 
 //==============================================================================
@@ -189,10 +174,4 @@ void AudioPluginAudioProcessor::setStateInformation (const void* data, int sizeI
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new AudioPluginAudioProcessor();
-}
-
-//==============================================================================RRR
-juce::MidiKeyboardState &AudioPluginAudioProcessor::getKeyboardState()
-{
-    return keyboardState;
 }

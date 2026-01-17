@@ -1,7 +1,11 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
-#include "SynthAudioSource.h"
+#include <memory>
+
+namespace OpenLooper2 {
+    class Looper;
+}
 
 //==============================================================================
 class AudioPluginAudioProcessor  : public juce::AudioProcessor
@@ -11,16 +15,6 @@ public:
     AudioPluginAudioProcessor();
     ~AudioPluginAudioProcessor() override;
 
-
-    void setLevelAt(int index, float value) {
-        synthAudioSource.setLevelAt(index, value);
-    }
-    float getLevelAt(int index) {
-        return synthAudioSource.getLevelAt(index);
-    }
-
-
-
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -28,7 +22,6 @@ public:
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
-    using AudioProcessor::processBlock;
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
@@ -53,12 +46,15 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    juce::MidiKeyboardState& getKeyboardState();
+    //==============================================================================
+    // Looper access for UI
+    const OpenLooper2::Looper& getLooper() const { return *looper; }
+    juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
 private:
-    SynthAudioSource synthAudioSource;
-    juce::MidiKeyboardState keyboardState;
-
     //==============================================================================
+    std::unique_ptr<OpenLooper2::Looper> looper;
+    juce::AudioProcessorValueTreeState apvts;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioPluginAudioProcessor)
 };
