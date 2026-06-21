@@ -48,13 +48,11 @@ public:
 
     //==============================================================================
     // Looper access for UI
-    const OpenLooper2::Looper& getLooper() const { return *looper; }
-    juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
+    std::unique_ptr<OpenLooper2::Looper> looper;
+    juce::AudioProcessorValueTreeState apvts;
 
 private:
     //==============================================================================
-    std::unique_ptr<OpenLooper2::Looper> looper;
-    juce::AudioProcessorValueTreeState apvts;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioPluginAudioProcessor)
 };

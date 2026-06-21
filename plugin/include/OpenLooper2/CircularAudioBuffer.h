@@ -28,10 +28,22 @@ public:
     void write(const juce::AudioBuffer<float>& input, int startSample, int numSamples);
 
     /**
-     * Read audio data from the buffer at a specific offset.
+     * Read audio data from the buffer at a specific offset from write head.
      * This is lock-free and safe to call from the audio thread.
      */
     void read(juce::AudioBuffer<float>& output, int startSample, int numSamples, int readOffset = 0);
+
+    /**
+     * Read audio data from the buffer at an absolute position.
+     * Position wraps around via buffer mask.
+     */
+    void readAtPosition(juce::AudioBuffer<float>& output, int startSample, int numSamples, int absolutePosition);
+
+    /**
+     * Write audio data to the buffer at an absolute position (for overdub write-back).
+     * Does NOT advance the write head.
+     */
+    void writeAtPosition(const juce::AudioBuffer<float>& input, int startSample, int numSamples, int absolutePosition);
 
     /**
      * Clear the buffer contents.

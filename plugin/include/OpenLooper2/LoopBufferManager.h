@@ -37,9 +37,18 @@ public:
      * @param output The output audio buffer
      * @param startSample Starting sample in the output buffer
      * @param numSamples Number of samples to read
-     * @param position Normalized position in the loop (0.0 to 1.0)
+     * @param positionInSamples Position in the loop in samples (not normalized)
      */
-    void readAudio(juce::AudioBuffer<float>& output, int startSample, int numSamples, float position);
+    void readAudio(juce::AudioBuffer<float>& output, int startSample, int numSamples, int positionInSamples);
+
+    /**
+     * Write audio back to the loop buffer at a specific position (for overdub).
+     * @param input The audio to write back
+     * @param startSample Starting sample in the input buffer
+     * @param numSamples Number of samples to write
+     * @param positionInSamples Position in the loop in samples
+     */
+    void writeBackAudio(const juce::AudioBuffer<float>& input, int startSample, int numSamples, int positionInSamples);
 
     /**
      * Set the current loop length in samples.
@@ -75,6 +84,7 @@ public:
 private:
     CircularAudioBuffer circularBuffer;
     std::atomic<int> loopLengthSamples{0};
+    std::atomic<int> loopStartPosition{0};  // Capture write head at end of recording
     std::atomic<bool> initialized{false};
     
     double sampleRate{44100.0};

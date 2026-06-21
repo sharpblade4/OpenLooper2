@@ -1,4 +1,5 @@
 #include "OpenLooper2/TransportController.h"
+#include <cmath>
 
 namespace OpenLooper2 {
 
@@ -10,10 +11,10 @@ TransportController::~TransportController()
 {
 }
 
-void TransportController::initialize(double sampleRate, int samplesPerBlock)
+void TransportController::initialize(double newSampleRate, int newSamplesPerBlock)
 {
-    this->sampleRate = sampleRate;
-    this->samplesPerBlock = samplesPerBlock;
+    this->sampleRate = newSampleRate;
+    this->samplesPerBlock = newSamplesPerBlock;
     
     currentState.store(State::Stopped, std::memory_order_release);
     playbackPosition.store(0.0f, std::memory_order_release);
@@ -46,6 +47,8 @@ void TransportController::startRecording()
     if (!initialized.load(std::memory_order_acquire))
         return;
     
+    // Reset everything for a fresh recording
+    loopLengthSamples.store(0, std::memory_order_release);
     resetPosition();
     currentState.store(State::Recording, std::memory_order_release);
 }
@@ -156,6 +159,35 @@ void TransportController::updatePosition(int numSamples)
     }
     
     playbackPosition.store(normalizedPosition, std::memory_order_release);
+}
+
+void TransportController::setHostSyncEnabled(bool enabled)
+{
+    hostSyncEnabled.store(enabled, std::memory_order_release);
+}
+
+void TransportController::updateHostTransport(bool isPlaying, double ppqPosition, double bpm)
+{
+    hostIsPlaying.store(isPlaying, std::memory_order_release);
+    hostPpqPosition.store(ppqPosition, std::memory_order_release);
+    hostBpm.store(bpm, std::memory_order_release);
+}
+
+bool TransportController::shouldQuantizeToHost() const
+{
+    if (!hostSyncEnabled.load(std::memory_order_acquire))
+        return true; // Always allow if sync is disabled
+    
+    if (!hostIsPlaying.load(std::memory_order_acquire))
+        return true; // Allow if host is not playing
+    
+    const double ppq = hostPpqPosition.load(std::memory_order_acquire);
+    
+    // Check if we're close to a beat boundary (within 1/32 of a beat)
+    const double fractionalBeat = ppq - std::floor(ppq);
+    const double tolerance = 1.0 / 32.0;
+    
+    return (fractionalBeat < tolerance) || (fractionalBeat > (1.0 - tolerance));
 }
 
 } // namespace OpenLooper2

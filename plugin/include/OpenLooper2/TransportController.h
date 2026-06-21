@@ -25,10 +25,10 @@ public:
 
     /**
      * Initialize the transport controller with audio specifications.
-     * @param sampleRate The audio sample rate
-     * @param samplesPerBlock Expected samples per audio block
+     * @param newSampleRate The audio sample rate
+     * @param newSamplesPerBlock Expected samples per audio block
      */
-    void initialize(double sampleRate, int samplesPerBlock);
+    void initialize(double newSampleRate, int newSamplesPerBlock);
 
     /**
      * Process a block of audio samples, updating timing and position.
@@ -82,15 +82,46 @@ public:
      */
     bool isInitialized() const { return initialized.load(std::memory_order_acquire); }
 
+    /**
+     * Enable or disable host transport synchronization.
+     * @param enabled True to enable sync, false to disable
+     */
+    void setHostSyncEnabled(bool enabled);
+
+    /**
+     * Check if host transport synchronization is enabled.
+     */
+    bool isHostSyncEnabled() const { return hostSyncEnabled.load(std::memory_order_acquire); }
+
+    /**
+     * Update host transport information for synchronization.
+     * @param isPlaying True if host transport is playing
+     * @param ppqPosition Current position in quarter notes
+     * @param bpm Current tempo in beats per minute
+     */
+    void updateHostTransport(bool isPlaying, double ppqPosition, double bpm);
+
+    /**
+     * Check if quantization should be applied based on host transport.
+     * @return True if the current timing aligns with beat boundaries
+     */
+    bool shouldQuantizeToHost() const;
+
 private:
     std::atomic<State> currentState{State::Stopped};
     std::atomic<float> playbackPosition{0.0f};
     std::atomic<int> playbackPositionSamples{0};
     std::atomic<int> loopLengthSamples{0};
     std::atomic<bool> initialized{false};
+    std::atomic<bool> hostSyncEnabled{false};
     
     double sampleRate{44100.0};
     int samplesPerBlock{512};
+    
+    // Host transport information
+    std::atomic<bool> hostIsPlaying{false};
+    std::atomic<double> hostPpqPosition{0.0};
+    std::atomic<double> hostBpm{120.0};
 
     /**
      * Update the playback position based on the number of samples processed.

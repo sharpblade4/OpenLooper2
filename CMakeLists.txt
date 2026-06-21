@@ -19,6 +19,7 @@ CPMAddPackage(
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 add_subdirectory(plugin)
+add_subdirectory(tests)
 # cmake --build build
 
 # in VSCode you need to save.

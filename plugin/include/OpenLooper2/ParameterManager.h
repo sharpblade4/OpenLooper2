@@ -19,6 +19,7 @@ public:
     static constexpr const char* OVERDUB_ID = "overdub";
     static constexpr const char* FEEDBACK_ID = "feedback";
     static constexpr const char* VOLUME_ID = "volume";
+    static constexpr const char* HOST_SYNC_ID = "hostSync";
 
     ParameterManager();
     ~ParameterManager();
@@ -49,6 +50,7 @@ public:
      */
     float getFeedbackLevel() const { return feedbackLevel.load(std::memory_order_acquire); }
     float getVolumeLevel() const { return volumeLevel.load(std::memory_order_acquire); }
+    bool getHostSyncEnabled() const { return hostSyncEnabled.load(std::memory_order_acquire); }
 
     /**
      * Set parameter values programmatically.
@@ -71,6 +73,7 @@ private:
     // Continuous parameter values
     std::atomic<float> feedbackLevel{0.8f};
     std::atomic<float> volumeLevel{1.0f};
+    std::atomic<bool> hostSyncEnabled{false};
     
     // Previous button states for edge detection
     std::atomic<bool> prevRecordState{false};

@@ -70,11 +70,34 @@ private:
     
     double sampleRate{44100.0};
     int samplesPerBlock{512};
+    
+    // Smoothing for parameter changes to prevent artifacts
+    juce::SmoothedValue<float> feedbackSmoothing;
+    juce::SmoothedValue<float> gainSmoothing;
+    
+    // Gain staging constants
+    static constexpr float CLIPPING_THRESHOLD = 0.95f;
+    static constexpr float AUTO_GAIN_REDUCTION = 0.9f;
+    static constexpr float SOFT_CLIP_KNEE = 0.7f;
 
     /**
      * Apply smooth parameter changes to prevent audio artifacts.
      */
     void updateGainParameters();
+
+    /**
+     * Apply soft clipping to prevent hard clipping artifacts.
+     * @param value Input value
+     * @return Soft-clipped value
+     */
+    float applySoftClipping(float value) const;
+
+    /**
+     * Calculate peak level for gain staging.
+     * @param buffer Audio buffer to analyze
+     * @return Peak level across all channels
+     */
+    float calculatePeakLevel(const juce::AudioBuffer<float>& buffer) const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(OverdubEngine)
 };

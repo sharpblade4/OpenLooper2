@@ -10,7 +10,7 @@ ParameterManager::~ParameterManager()
 {
 }
 
-void ParameterManager::createParameters(juce::AudioProcessorValueTreeState& apvts)
+void ParameterManager::createParameters(juce::AudioProcessorValueTreeState& /*apvts*/)
 {
     // The parameters are created through the AudioProcessorValueTreeState constructor
     // This method can be used for additional parameter setup if needed
@@ -41,6 +41,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout ParameterManager::createPara
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         VOLUME_ID, "Volume", 
         juce::NormalisableRange<float>(0.0f, 2.0f, 0.01f), 1.0f));
+    
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        HOST_SYNC_ID, "Host Sync", false));
 
     return layout;
 }
@@ -80,9 +83,11 @@ void ParameterManager::updateFromParameters(const juce::AudioProcessorValueTreeS
     // Update continuous parameters
     const float newFeedback = *apvts.getRawParameterValue(FEEDBACK_ID);
     const float newVolume = *apvts.getRawParameterValue(VOLUME_ID);
+    const bool newHostSync = *apvts.getRawParameterValue(HOST_SYNC_ID) > 0.5f;
     
     feedbackLevel.store(newFeedback, std::memory_order_release);
     volumeLevel.store(newVolume, std::memory_order_release);
+    hostSyncEnabled.store(newHostSync, std::memory_order_release);
 }
 
 bool ParameterManager::wasRecordTriggered()
