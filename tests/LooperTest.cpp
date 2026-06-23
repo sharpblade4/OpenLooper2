@@ -81,6 +81,7 @@ void testOverdubNoFeedback()
         auto proc = createDummyProcessor();
         juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "Parameters",
             Looper::createParameterLayout());
+        juce::MidiBuffer midi;
 
         // Step 1: Record a loop (4 blocks of silence to create a known loop)
         looper.triggerRecord();
@@ -88,7 +89,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear(); // record silence
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Step 2: Stop recording → transitions to Playing
@@ -96,7 +97,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Step 3: Start overdubbing
@@ -104,7 +105,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts); // consume the trigger
+            looper.processBlock(buf, midi, apvts); // consume the trigger
         }
 
         // Step 4: Feed a known signal as live input during overdub
@@ -114,7 +115,7 @@ void testOverdubNoFeedback()
             for (int s = 0; s < blockSize; ++s)
                 inputBuf.setSample(ch, s, inputSignalValue);
 
-        looper.processBlock(inputBuf, apvts);
+        looper.processBlock(inputBuf, midi, apvts);
 
         // Verify: output should NOT contain the live input signal.
         // The loop was recorded as silence, so output should be ~0.
@@ -133,6 +134,7 @@ void testOverdubNoFeedback()
         auto proc = createDummyProcessor();
         juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "Parameters",
             Looper::createParameterLayout());
+        juce::MidiBuffer midi;
 
         // Record 2 blocks of silence
         looper.triggerRecord();
@@ -140,7 +142,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Stop recording
@@ -148,7 +150,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Start overdub
@@ -156,7 +158,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Overdub with a known signal for one block
@@ -166,7 +168,7 @@ void testOverdubNoFeedback()
             for (int ch = 0; ch < numChannels; ++ch)
                 for (int s = 0; s < blockSize; ++s)
                     buf.setSample(ch, s, inputVal);
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Stop overdub → back to Playing
@@ -174,7 +176,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
         }
 
         // Now in Playing state, loop through until we hit the block we overdubbed.
@@ -186,7 +188,7 @@ void testOverdubNoFeedback()
         {
             juce::AudioBuffer<float> buf(numChannels, blockSize);
             buf.clear();
-            looper.processBlock(buf, apvts);
+            looper.processBlock(buf, midi, apvts);
             for (int ch = 0; ch < numChannels; ++ch)
                 for (int s = 0; s < blockSize; ++s)
                     maxPlayback = std::max(maxPlayback, std::abs(buf.getSample(ch, s)));
@@ -202,6 +204,7 @@ void testOverdubNoFeedback()
         auto proc = createDummyProcessor();
         juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "Parameters",
             Looper::createParameterLayout());
+        juce::MidiBuffer midi;
 
         // Feed audio into stopped looper
         juce::AudioBuffer<float> buf(numChannels, blockSize);
@@ -209,7 +212,7 @@ void testOverdubNoFeedback()
             for (int s = 0; s < blockSize; ++s)
                 buf.setSample(ch, s, 0.9f);
 
-        looper.processBlock(buf, apvts);
+        looper.processBlock(buf, midi, apvts);
 
         // Output must be silent (no pass-through)
         float peak = 0.0f;
@@ -228,6 +231,7 @@ void testStateMachine()
     const double sampleRate = 44100.0;
     const int blockSize = 512;
     const int numChannels = 2;
+    juce::MidiBuffer midi;
 
     // Helper lambda to process one block
     auto tick = [&](Looper& looper, juce::AudioProcessorValueTreeState& apvts, float fillVal = 0.0f) {
@@ -238,7 +242,8 @@ void testStateMachine()
                     buf.setSample(ch, s, fillVal);
         else
             buf.clear();
-        looper.processBlock(buf, apvts);
+        juce::MidiBuffer midi;
+        looper.processBlock(buf, midi, apvts);
         return buf;
     };
 
@@ -389,7 +394,7 @@ void testStateMachine()
         tick(looper, apvts); // consume trigger
         juce::AudioBuffer<float> out(numChannels, blockSize);
         out.clear();
-        looper.processBlock(out, apvts);
+        looper.processBlock(out, midi, apvts);
         // Should hear the recorded signal
         float peak = 0.0f;
         for (int ch = 0; ch < numChannels; ++ch)

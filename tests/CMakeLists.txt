@@ -26,6 +26,9 @@ add_executable(LooperTest
     ../plugin/source/TransportController.cpp
     ../plugin/source/OverdubEngine.cpp
     ../plugin/source/ParameterManager.cpp
+    ../plugin/source/ActiveNoteTracker.cpp
+    ../plugin/source/MidiLoopBuffer.cpp
+    ../plugin/source/MidiLooper.cpp
 )
 
 target_include_directories(LooperTest PRIVATE

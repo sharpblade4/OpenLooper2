@@ -28,6 +28,8 @@ private:
     juce::TextButton playButton;
     juce::TextButton stopButton;
     juce::TextButton overdubButton;
+    juce::TextButton exportButton;
+    juce::TextButton oneLoopOverdubButton;
     
     // Sliders for continuous parameters
     juce::Slider feedbackSlider;
@@ -48,6 +50,7 @@ private:
     void updateButtonStates();
     juce::Colour getStateColour() const;
     void drawWaveformArea(juce::Graphics& g, juce::Rectangle<int> bounds);
+    void drawPianoRoll(juce::Graphics& g, juce::Rectangle<int> bounds);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AudioPluginAudioProcessorEditor)
 };

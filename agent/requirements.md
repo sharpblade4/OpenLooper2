@@ -111,3 +111,26 @@ This document specifies the requirements for adding audio looper functionality t
 3. WHEN memory allocation fails, THE Looper SHALL display an error message and disable recording until memory is available
 4. THE Looper SHALL validate all user inputs and parameter changes before applying them
 5. WHEN the plugin is loaded in an unsupported host configuration, THE Looper SHALL display appropriate warnings but remain functional
+
+### Requirement 9: Loop Export
+
+**User Story:** As a musician, I want to export my recorded loop as a WAV file, so that I can use it in other projects or share it.
+
+#### Acceptance Criteria
+
+1. WHEN the user presses the Export button, THE Looper SHALL open a file save dialog allowing the user to choose a destination
+2. THE Looper SHALL export the current loop content as a 24-bit WAV file at the current sample rate
+3. WHEN no loop is recorded, THE Export button SHALL do nothing
+4. THE exported file SHALL contain the exact audio content of the loop buffer
+
+### Requirement 10: One-Loop Overdub
+
+**User Story:** As a musician, I want a single-pass overdub mode that automatically starts and stops with the loop boundaries, so that I can layer audio precisely without manual timing.
+
+#### Acceptance Criteria
+
+1. WHEN the user presses the 1-Loop Overdub button, THE Looper SHALL arm itself and wait for the next loop boundary
+2. WHEN the loop position reaches the start of the loop, THE Looper SHALL automatically begin overdubbing
+3. WHEN overdubbing completes one full loop cycle, THE Looper SHALL automatically stop overdubbing and return to playing state
+4. WHEN the looper is stopped with a recorded loop, pressing 1-Loop Overdub SHALL start playback and arm the overdub
+5. THE UI SHALL indicate the armed state visually while waiting for the loop boundary

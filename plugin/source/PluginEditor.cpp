@@ -2,6 +2,8 @@
 #include "OpenLooper2/PluginEditor.h"
 #include "OpenLooper2/Looper.h"
 #include "OpenLooper2/TransportController.h"
+#include "OpenLooper2/MidiLooper.h"
+#include "OpenLooper2/MidiLoopBuffer.h"
 
 //==============================================================================
 AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAudioProcessor& p)
@@ -27,6 +29,16 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAud
     overdubButton.setButtonText("Overdub");
     overdubButton.addListener(this);
     addAndMakeVisible(overdubButton);
+    
+    // Set up Export button
+    exportButton.setButtonText("Export");
+    exportButton.addListener(this);
+    addAndMakeVisible(exportButton);
+    
+    // Set up 1-Loop Overdub button
+    oneLoopOverdubButton.setButtonText("1-Loop OD");
+    oneLoopOverdubButton.addListener(this);
+    addAndMakeVisible(oneLoopOverdubButton);
     
     // Set up Feedback slider
     feedbackSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
@@ -70,6 +82,8 @@ AudioPluginAudioProcessorEditor::~AudioPluginAudioProcessorEditor()
     playButton.removeListener(this);
     stopButton.removeListener(this);
     overdubButton.removeListener(this);
+    exportButton.removeListener(this);
+    oneLoopOverdubButton.removeListener(this);
 }
 
 void AudioPluginAudioProcessorEditor::buttonClicked(juce::Button* button)
@@ -85,6 +99,10 @@ void AudioPluginAudioProcessorEditor::buttonClicked(juce::Button* button)
         processorRef.looper->triggerStop();
     else if (button == &overdubButton)
         processorRef.looper->triggerOverdub();
+    else if (button == &exportButton)
+        processorRef.looper->exportLoop();
+    else if (button == &oneLoopOverdubButton)
+        processorRef.looper->triggerOneLoopOverdub();
 }
 
 void AudioPluginAudioProcessorEditor::paint (juce::Graphics& g)
@@ -96,6 +114,14 @@ void AudioPluginAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour(juce::Colours::white);
     g.setFont(24.0f);
     g.drawText("OpenLooper2", 0, 10, getWidth(), 40, juce::Justification::centred);
+    
+    // MIDI mode indicator
+    if (processorRef.looper && processorRef.looper->isMidiMode())
+    {
+        g.setColour(juce::Colours::cyan);
+        g.setFont(12.0f);
+        g.drawText("MIDI", 20, 15, 50, 20, juce::Justification::centredLeft);
+    }
     
     // State indicator
     const auto stateColour = getStateColour();
@@ -143,7 +169,7 @@ void AudioPluginAudioProcessorEditor::resized()
     auto buttonArea = bounds.removeFromTop(80);
     buttonArea.reduce(20, 10);
     
-    const int buttonWidth = (buttonArea.getWidth() - 30) / 4;
+    const int buttonWidth = (buttonArea.getWidth() - 50) / 6;
     recordButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
     buttonArea.removeFromLeft(10);
     playButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
@@ -151,6 +177,10 @@ void AudioPluginAudioProcessorEditor::resized()
     stopButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
     buttonArea.removeFromLeft(10);
     overdubButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
+    buttonArea.removeFromLeft(10);
+    oneLoopOverdubButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
+    buttonArea.removeFromLeft(10);
+    exportButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
     
     // Sliders area
     bounds.removeFromTop(10);
@@ -205,11 +235,16 @@ void AudioPluginAudioProcessorEditor::updateButtonStates()
                                      juce::dontSendNotification);
         stopButton.setToggleState(state == OpenLooper2::TransportController::State::Stopped, 
                                   juce::dontSendNotification);
+        oneLoopOverdubButton.setToggleState(processorRef.looper->isOneLoopOverdubArmed(),
+                                            juce::dontSendNotification);
         
         switch (state)
         {
             case OpenLooper2::TransportController::State::Stopped:
-                currentStateText = "Stopped";
+                if (processorRef.looper->isMidiMode() && processorRef.looper->getMidiLooper().isArmed())
+                    currentStateText = "Armed";
+                else
+                    currentStateText = "Stopped";
                 break;
             case OpenLooper2::TransportController::State::Recording:
                 currentStateText = "Recording";
@@ -237,6 +272,8 @@ juce::Colour AudioPluginAudioProcessorEditor::getStateColour() const
         return juce::Colours::green;
     else if (currentStateText == "Overdubbing")
         return juce::Colours::orange;
+    else if (currentStateText == "Armed")
+        return juce::Colours::yellow;
     else if (currentStateText == "Stopped")
         return juce::Colours::grey;
     else
@@ -245,6 +282,12 @@ juce::Colour AudioPluginAudioProcessorEditor::getStateColour() const
 
 void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::Rectangle<int> bounds)
 {
+    // In MIDI mode, draw piano roll instead
+    if (processorRef.looper && processorRef.looper->isMidiMode())
+    {
+        drawPianoRoll(g, bounds);
+        return;
+    }
     // Draw background
     g.setColour(juce::Colour(0xff1a1a1a));
     g.fillRoundedRectangle(bounds.toFloat(), 5.0f);
@@ -321,4 +364,114 @@ void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::
             g.drawText(juce::String(seconds, 2) + "s", bounds.reduced(5), juce::Justification::topRight);
         }
     }
+}
+
+void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rectangle<int> bounds)
+{
+    // Background
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.fillRoundedRectangle(bounds.toFloat(), 5.0f);
+    g.setColour(juce::Colour(0xff404040));
+    g.drawRoundedRectangle(bounds.toFloat(), 5.0f, 2.0f);
+
+    if (!processorRef.looper || !processorRef.looper->isInitialized())
+        return;
+
+    const auto& midiLooper = processorRef.looper->getMidiLooper();
+    const auto& loopBuffer = midiLooper.getLoopBuffer();
+    const auto& events = loopBuffer.getEvents();
+    const double loopLen = loopBuffer.getLoopLengthBeats();
+
+    // Show armed status
+    if (midiLooper.isArmed())
+    {
+        g.setColour(juce::Colours::yellow.withAlpha(0.7f));
+        g.setFont(14.0f);
+        g.drawText("Armed - start transport", bounds, juce::Justification::centred);
+        return;
+    }
+
+    if (events.empty() || loopLen <= 0.0)
+    {
+        g.setColour(juce::Colours::white.withAlpha(0.3f));
+        g.setFont(14.0f);
+        g.drawText("MIDI - no loop recorded", bounds, juce::Justification::centred);
+        return;
+    }
+
+    // Find note range for vertical scaling
+    int minNote = 127, maxNote = 0;
+    for (const auto& event : events)
+    {
+        if (event.message.isNoteOn())
+        {
+            minNote = juce::jmin(minNote, event.message.getNoteNumber());
+            maxNote = juce::jmax(maxNote, event.message.getNoteNumber());
+        }
+    }
+
+    if (minNote > maxNote) return;
+
+    // Add padding to note range
+    minNote = juce::jmax(0, minNote - 2);
+    maxNote = juce::jmin(127, maxNote + 2);
+    const int noteRange = maxNote - minNote + 1;
+
+    const float w = static_cast<float>(bounds.getWidth());
+    const float h = static_cast<float>(bounds.getHeight());
+    const float noteHeight = h / static_cast<float>(noteRange);
+
+    // Draw horizontal grid lines (semitones)
+    g.setColour(juce::Colour(0xff252525));
+    for (int n = minNote; n <= maxNote; ++n)
+    {
+        float y = bounds.getY() + h - (static_cast<float>(n - minNote + 1) * noteHeight);
+        g.drawHorizontalLine(static_cast<int>(y), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
+    }
+
+    // Draw note blocks
+    g.setColour(juce::Colours::cyan.withAlpha(0.8f));
+    const float minNoteWidth = 4.0f;
+
+    for (const auto& event : events)
+    {
+        if (!event.message.isNoteOn()) continue;
+
+        float x = bounds.getX() + static_cast<float>(event.ppqPosition / loopLen) * w;
+        float y = bounds.getY() + h - (static_cast<float>(event.message.getNoteNumber() - minNote + 1) * noteHeight);
+
+        // Find matching note-off to determine width
+        float noteW = minNoteWidth;
+        for (const auto& offEvent : events)
+        {
+            if (offEvent.message.isNoteOff() &&
+                offEvent.message.getNoteNumber() == event.message.getNoteNumber() &&
+                offEvent.ppqPosition > event.ppqPosition)
+            {
+                noteW = juce::jmax(minNoteWidth,
+                    static_cast<float>((offEvent.ppqPosition - event.ppqPosition) / loopLen) * w);
+                break;
+            }
+        }
+
+        // Velocity as brightness
+        float alpha = 0.4f + 0.6f * (event.message.getVelocity() / 127.0f);
+        g.setColour(juce::Colours::cyan.withAlpha(alpha));
+        g.fillRect(x, y, noteW, juce::jmax(2.0f, noteHeight - 1.0f));
+    }
+
+    // Playback cursor
+    const auto& transport = processorRef.looper->getTransportController();
+    if (transport.getCurrentState() != OpenLooper2::TransportController::State::Stopped)
+    {
+        float posX = bounds.getX() + playbackPosition * w;
+        g.setColour(juce::Colours::white.withAlpha(0.9f));
+        g.drawLine(posX, static_cast<float>(bounds.getY()),
+                   posX, static_cast<float>(bounds.getBottom()), 2.0f);
+    }
+
+    // Loop length label
+    g.setColour(juce::Colours::white.withAlpha(0.5f));
+    g.setFont(11.0f);
+    g.drawText(juce::String(loopLen, 1) + " beats", bounds.reduced(5), juce::Justification::topRight);
 }

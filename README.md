@@ -37,11 +37,21 @@ Then restart Ableton Live to reload the plugin.
 
 ## Usage in Ableton Live
 
+### Audio Looper
+
 1. Drag the plugin onto an **Audio track**
-2. **Arm** the track
-3. Set track monitoring to **Auto**
-4. Press Ableton's **Play** (transport must be running for audio to flow through the plugin)
-5. Press **Record** in the plugin UI, perform, then press **Record** again (or Stop/Play) to finish
+2. **Arm** the track, set monitoring to **Auto**
+3. Press **Record** in the plugin, perform, press **Record** again to loop
+
+### MIDI Looper
+
+1. Drag the plugin onto a **MIDI track** (after the instrument)
+2. Press **Record**, play your MIDI controller, press **Record** again to loop
+3. The plugin shows "MIDI" in the top-left when in MIDI mode
+4. Incoming MIDI always passes through to the instrument
+5. Use **Overdub** to layer more notes on top (pure additive)
+6. **Feedback** controls velocity decay per loop cycle (notes fade out over time)
+7. **Volume** scales playback note velocity
 
 ### Controls
 

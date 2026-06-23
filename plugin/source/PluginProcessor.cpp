@@ -93,6 +93,9 @@ void AudioPluginAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     // Initialize the looper with audio specifications
     const int numChannels = juce::jmax(getTotalNumInputChannels(), getTotalNumOutputChannels());
     looper->initialize(sampleRate, samplesPerBlock, numChannels);
+    
+    // Detect MIDI mode: no audio input channels means we're on a MIDI track
+    looper->setMidiMode(getTotalNumInputChannels() == 0);
 }
 
 void AudioPluginAudioProcessor::releaseResources()
@@ -128,8 +131,6 @@ bool AudioPluginAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
 void AudioPluginAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midiMessages)
 {
-    juce::ignoreUnused (midiMessages);
-
     juce::ScopedNoDenormals noDenormals;
     auto totalNumInputChannels  = getTotalNumInputChannels();
     auto totalNumOutputChannels = getTotalNumOutputChannels();
@@ -147,8 +148,8 @@ void AudioPluginAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         }
     }
 
-    // Process audio through the looper
-    looper->processBlock(buffer, apvts);
+    // Process through the looper (handles both audio and MIDI modes)
+    looper->processBlock(buffer, midiMessages, apvts);
 }
 
 //==============================================================================

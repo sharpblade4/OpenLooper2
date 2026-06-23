@@ -9,7 +9,8 @@ inclusion: always
 ### Always Follow This Sequence:
 1. Make code changes
 2. Run unit tests first: `cmake --build build --target LoopBufferTest && ./build/tests/LoopBufferTest`
-3. If tests pass, build the plugin: `cmake --build build --target OpenLooper2Plugin_VST3`
+3. Build the VST3 plugin: `cmake --build build --target OpenLooper2Plugin_VST3`
+   - **IMPORTANT**: Use `OpenLooper2Plugin_VST3` target, NOT `OpenLooper2Plugin` (which only builds the static library, not the actual .vst3 bundle)
 4. Deploy to Ableton: `rm -rf ~/Documents/VST_For_Ableton/OpenLooper2.vst3 && cp -r build/plugin/OpenLooper2Plugin_artefacts/Debug/VST3/OpenLooper2.vst3 ~/Documents/VST_For_Ableton/`
 
 ### Testing Requirements:

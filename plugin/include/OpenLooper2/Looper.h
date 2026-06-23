@@ -4,6 +4,7 @@
 #include "TransportController.h"
 #include "OverdubEngine.h"
 #include "ParameterManager.h"
+#include "MidiLooper.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 namespace OpenLooper2 {
@@ -29,9 +30,11 @@ public:
     /**
      * Process a block of audio samples.
      * @param buffer The audio buffer to process
+     * @param midiMessages The MIDI buffer (pass-through + playback in MIDI mode)
      * @param apvts The AudioProcessorValueTreeState for parameter access
      */
-    void processBlock(juce::AudioBuffer<float>& buffer, 
+    void processBlock(juce::AudioBuffer<float>& buffer,
+                     juce::MidiBuffer& midiMessages,
                      const juce::AudioProcessorValueTreeState& apvts);
 
     /**
@@ -60,6 +63,18 @@ public:
     bool isInitialized() const { return initialized; }
 
     /**
+     * Set MIDI mode (no audio processing, MIDI looping instead).
+     * Called from prepareToPlay based on bus layout.
+     */
+    void setMidiMode(bool enabled) { midiMode = enabled; }
+    bool isMidiMode() const { return midiMode; }
+
+    /**
+     * Get access to the MidiLooper for UI queries.
+     */
+    const MidiLooper& getMidiLooper() const { return midiLooper; }
+
+    /**
      * Direct trigger methods for UI buttons (thread-safe, lock-free).
      * These set atomic flags consumed by the audio thread.
      */
@@ -67,6 +82,16 @@ public:
     void triggerPlay()   { pendingPlay.store(true, std::memory_order_release); }
     void triggerStop()   { pendingStop.store(true, std::memory_order_release); }
     void triggerOverdub(){ pendingOverdub.store(true, std::memory_order_release); }
+    void triggerOneLoopOverdub() { pendingOneLoopOverdub.store(true, std::memory_order_release); }
+
+    /**
+     * Export the current loop as a WAV file.
+     * Opens a file chooser dialog; call from UI thread only.
+     */
+    void exportLoop();
+
+    /** True while waiting for loop start to begin 1-loop overdub. */
+    bool isOneLoopOverdubArmed() const { return oneLoopOverdubArmed.load(std::memory_order_acquire); }
 
     /** Toggle debug logging on/off. */
     void setDebugEnabled(bool enabled) { debugEnabled.store(enabled, std::memory_order_release); }
@@ -94,8 +119,10 @@ private:
     TransportController transportController;
     OverdubEngine overdubEngine;
     ParameterManager parameterManager;
+    MidiLooper midiLooper;
     
     bool initialized{false};
+    bool midiMode{false};
     double sampleRate{44100.0};
     int samplesPerBlock{512};
     int numChannels{2};
@@ -105,11 +132,20 @@ private:
     std::atomic<bool> pendingPlay{false};
     std::atomic<bool> pendingStop{false};
     std::atomic<bool> pendingOverdub{false};
+    std::atomic<bool> pendingOneLoopOverdub{false};
+    std::atomic<bool> oneLoopOverdubArmed{false};  // waiting for loop start
+    std::atomic<bool> oneLoopOverdubActive{false}; // overdubbing for one loop
     std::atomic<bool> debugEnabled{false};
+    
+    // File chooser kept alive during async save
+    std::unique_ptr<juce::FileChooser> fileChooser;
     
     // Temporary buffers for processing
     juce::AudioBuffer<float> tempBuffer;
     juce::AudioBuffer<float> loopBuffer;
+    
+    // Last host position info for MIDI looper
+    juce::AudioPlayHead::PositionInfo lastPositionInfo;
 
     /**
      * Handle transport state changes based on parameter triggers.

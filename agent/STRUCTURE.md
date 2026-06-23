@@ -67,17 +67,27 @@ open_looper2/
 - **Manufacturer Code**: RONU
 - **Format**: VST3
 - **Audio**: Stereo input/output, no MIDI (yet)
-- **Build Target**: `/build/plugin/OpenLooper2Plugin_artefacts/VST3`
+- **Build Target**: `/build/plugin/OpenLooper2Plugin_artefacts/Debug/VST3/OpenLooper2.vst3`
+- **CMake Build Targets**:
+  - `OpenLooper2Plugin` — static library only (NOT the deployable plugin)
+  - `OpenLooper2Plugin_VST3` — the actual .vst3 bundle (use this for deployment)
+  - `OpenLooper2Plugin_All` — builds everything
+  - `LoopBufferTest` — unit tests
 
 ## Development Status
 The project is currently in **template stage** with:
 - ✅ Basic JUCE plugin structure
 - ✅ CMake build system
 - ✅ VST3 configuration
-- ⏳ Audio looping logic (not implemented)
-- ⏳ UI controls for looper functionality
-- ⏳ State management for loop recording/playback
-- 🔮 Future: MIDI looping capabilities
+- ✅ Audio looping (record, play, stop, overdub)
+- ✅ Waveform visualization with playback position
+- ✅ MIDI looping with piano roll display
+- ✅ Parameter automation (feedback, volume)
+- ✅ Host transport sync
+- ✅ Loop export as WAV file
+- ✅ 1-Loop Overdub (auto-start/stop at loop boundaries)
+- ⏳ Property-based tests (optional)
+- ⏳ Final polish and optimization
 
 ## Next Development Steps
 1. Implement audio buffer recording in `processBlock()`

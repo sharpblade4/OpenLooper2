@@ -1,4 +1,5 @@
 #include "OpenLooper2/Looper.h"
+#include <juce_audio_formats/juce_audio_formats.h>
 
 #define LOOPER_DBG(msg) do { if (debugEnabled.load(std::memory_order_relaxed)) { DBG(msg); } } while(0)
 
@@ -24,6 +25,7 @@ void Looper::initialize(double newSampleRate, int newSamplesPerBlock, int newNum
     loopBufferManager.initialize(newSampleRate, newNumChannels, maxLoopLengthSeconds);
     transportController.initialize(newSampleRate, newSamplesPerBlock);
     overdubEngine.initialize(newSampleRate, newSamplesPerBlock);
+    midiLooper.initialize(newSampleRate, newSamplesPerBlock);
     
     // Prepare temporary buffers
     tempBuffer.setSize(newNumChannels, newSamplesPerBlock);
@@ -32,7 +34,8 @@ void Looper::initialize(double newSampleRate, int newSamplesPerBlock, int newNum
     initialized = true;
 }
 
-void Looper::processBlock(juce::AudioBuffer<float>& buffer, 
+void Looper::processBlock(juce::AudioBuffer<float>& buffer,
+                         juce::MidiBuffer& midiMessages,
                          const juce::AudioProcessorValueTreeState& apvts)
 {
     if (!initialized)
@@ -43,10 +46,45 @@ void Looper::processBlock(juce::AudioBuffer<float>& buffer,
     // Validate buffer size
     if (numSamples <= 0 || numSamples > samplesPerBlock * 2)
     {
-        // Invalid buffer size - clear and return
         buffer.clear();
         return;
     }
+
+    // MIDI mode: pass-through + MIDI looping, no audio
+    if (midiMode)
+    {
+        buffer.clear();
+        
+        // Debug: log incoming MIDI
+        if (debugEnabled.load(std::memory_order_relaxed) && !midiMessages.isEmpty())
+        {
+            DBG("MIDI mode: " << midiMessages.getNumEvents() << " events in, state=" 
+                << static_cast<int>(transportController.getCurrentState()));
+        }
+        
+        // Update parameters
+        parameterManager.updateFromParameters(apvts);
+        
+        // Handle transport controls (same state machine for both modes)
+        handleTransportControls();
+        
+        // Check if stop was just triggered — need to send note-offs
+        const auto state = transportController.getCurrentState();
+        if (state == TransportController::State::Stopped && midiLooper.getNoteTracker().hasActiveNotes())
+            midiLooper.stop(midiMessages, 0);
+        
+        // Process MIDI looper (incoming pass-through + playback merged)
+        const float velocityScale = parameterManager.getVolumeLevel();
+        const float feedback = parameterManager.getFeedbackLevel();
+        midiLooper.processBlock(midiMessages, transportController, lastPositionInfo, velocityScale, feedback);
+        
+        // Update transport timing
+        transportController.processBlock(numSamples);
+        return;
+    }
+
+    // Audio mode: existing behavior
+    midiMessages.clear();
     
     // Check for invalid audio data (NaN or Inf)
     if (containsInvalidData(buffer))
@@ -101,6 +139,9 @@ void Looper::updateHostTransport(const juce::AudioPlayHead::PositionInfo& positi
     if (!initialized)
         return;
     
+    // Store for MidiLooper use
+    lastPositionInfo = positionInfo;
+    
     // Extract host transport information
     const bool isPlaying = positionInfo.getIsPlaying();
     const auto ppqPosition = positionInfo.getPpqPosition();
@@ -129,8 +170,51 @@ void Looper::handleTransportControls()
                           || pendingStop.exchange(false, std::memory_order_acq_rel);
     const bool overdubPressed = parameterManager.wasOverdubTriggered() 
                              || pendingOverdub.exchange(false, std::memory_order_acq_rel);
+    const bool oneLoopOverdubPressed = pendingOneLoopOverdub.exchange(false, std::memory_order_acq_rel);
     
     const auto state = transportController.getCurrentState();
+    
+    // --- 1-LOOP OVERDUB button ---
+    if (oneLoopOverdubPressed)
+    {
+        const int loopLength = transportController.getLoopLength();
+        if (loopLength > 0 && (state == TransportController::State::Playing || state == TransportController::State::Stopped))
+        {
+            // Arm: will start overdubbing at next loop boundary
+            oneLoopOverdubArmed.store(true, std::memory_order_release);
+            oneLoopOverdubActive.store(false, std::memory_order_release);
+            // Ensure playback is running
+            if (state == TransportController::State::Stopped)
+                transportController.startPlayback();
+            LOOPER_DBG("1-Loop Overdub armed, waiting for loop start");
+        }
+    }
+    
+    // --- 1-LOOP OVERDUB state machine ---
+    if (oneLoopOverdubArmed.load(std::memory_order_acquire))
+    {
+        // Check if we're at (or just crossed) the loop start
+        const int pos = transportController.getPlaybackPositionSamples();
+        if (pos < samplesPerBlock)  // near loop start
+        {
+            oneLoopOverdubArmed.store(false, std::memory_order_release);
+            oneLoopOverdubActive.store(true, std::memory_order_release);
+            transportController.startOverdub();
+            LOOPER_DBG("1-Loop Overdub: started at loop boundary, pos=" << pos);
+        }
+    }
+    else if (oneLoopOverdubActive.load(std::memory_order_acquire))
+    {
+        // Check if we've reached/crossed the loop end (position wrapped back to start)
+        const int pos = transportController.getPlaybackPositionSamples();
+        if (pos < samplesPerBlock)  // wrapped back to start
+        {
+            oneLoopOverdubActive.store(false, std::memory_order_release);
+            transportController.stopOverdub();
+            waveformNeedsUpdate.store(true, std::memory_order_release);
+            LOOPER_DBG("1-Loop Overdub: finished, pos=" << pos);
+        }
+    }
     
     // --- RECORD button ---
     if (recordPressed)
@@ -138,6 +222,21 @@ void Looper::handleTransportControls()
         if (state == TransportController::State::Recording)
         {
             // Recording → Playing (finalize loop)
+            if (midiMode)
+            {
+                // Calculate loop length snapped to bar boundary
+                const double ppq = lastPositionInfo.getPpqPosition().orFallback(0.0);
+                auto ts = lastPositionInfo.getTimeSignature();
+                int num = ts ? ts->numerator : 4;
+                int den = ts ? ts->denominator : 4;
+                double beatsPerBar = static_cast<double>(num) * (4.0 / den);
+                double rawLength = ppq - midiLooper.getLoopStartPpq();
+                double loopBars = std::ceil(rawLength / beatsPerBar);
+                if (loopBars < 1.0) loopBars = 1.0;
+                double loopLengthBeats = loopBars * beatsPerBar;
+                midiLooper.getLoopBufferMut().setLoopLengthBeats(loopLengthBeats);
+                LOOPER_DBG("MIDI Record→Playing, loop=" << loopLengthBeats << " beats");
+            }
             transportController.stopRecording();
             loopBufferManager.setLoopLength(transportController.getLoopLength());
             waveformNeedsUpdate.store(true, std::memory_order_release);
@@ -145,11 +244,20 @@ void Looper::handleTransportControls()
         }
         else
         {
-            // Any other state → Recording (clear and start fresh)
-            loopBufferManager.clear();
-            waveformLength.store(0, std::memory_order_release);
-            transportController.startRecording();
-            LOOPER_DBG("Record pressed: →Recording");
+            if (midiMode && !midiLooper.isHostTransportRunning())
+            {
+                // Arm — wait for host transport to start
+                midiLooper.arm();
+                LOOPER_DBG("Record pressed: armed, waiting for host transport");
+            }
+            else
+            {
+                // Any other state → Recording (clear and start fresh)
+                loopBufferManager.clear();
+                waveformLength.store(0, std::memory_order_release);
+                transportController.startRecording();
+                LOOPER_DBG("Record pressed: →Recording");
+            }
         }
     }
     
@@ -203,6 +311,7 @@ void Looper::handleTransportControls()
         else if (state == TransportController::State::Overdubbing)
         {
             transportController.stopOverdub();
+            waveformNeedsUpdate.store(true, std::memory_order_release);
             LOOPER_DBG("Overdub pressed: Overdubbing→Playing");
         }
         else if (state == TransportController::State::Stopped && transportController.getLoopLength() > 0)
@@ -364,6 +473,55 @@ void Looper::updateWaveformDisplay()
     
     waveformLength.store(WAVEFORM_RESOLUTION, std::memory_order_release);
     waveformDirty.store(true, std::memory_order_release);
+}
+
+void Looper::exportLoop()
+{
+    const int loopLength = loopBufferManager.getLoopLength();
+    if (loopLength <= 0 || !initialized)
+        return;
+    
+    // Read the entire loop into a buffer
+    juce::AudioBuffer<float> exportBuffer(numChannels, loopLength);
+    loopBufferManager.readAudio(exportBuffer, 0, loopLength, 0);
+    
+    // Show save dialog (async, stays alive via member unique_ptr)
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Export Loop as WAV",
+        juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("loop.wav"),
+        "*.wav");
+    
+    auto* chooserPtr = fileChooser.get();
+    chooserPtr->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles,
+        [this, buf = std::move(exportBuffer)](const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{})
+                return;
+            
+            // Ensure .wav extension
+            if (!file.hasFileExtension("wav"))
+                file = file.withFileExtension("wav");
+            
+            // Write WAV file
+            file.deleteFile();
+            std::unique_ptr<juce::FileOutputStream> outputStream(file.createOutputStream());
+            if (outputStream == nullptr)
+                return;
+            
+            juce::WavAudioFormat wavFormat;
+            std::unique_ptr<juce::AudioFormatWriter> writer(
+                wavFormat.createWriterFor(outputStream.get(),
+                    sampleRate,
+                    static_cast<unsigned int>(buf.getNumChannels()),
+                    24, {}, 0));
+            
+            if (writer != nullptr)
+            {
+                outputStream.release(); // writer takes ownership
+                writer->writeFromAudioSampleBuffer(buf, 0, buf.getNumSamples());
+            }
+        });
 }
 
 } // namespace OpenLooper2
