@@ -349,6 +349,7 @@ void Looper::processAudioForCurrentState(juce::AudioBuffer<float>& buffer)
 {
     const auto currentState = transportController.getCurrentState();
     const int numSamples = buffer.getNumSamples();
+    const bool passthrough = monitorPassthrough.load(std::memory_order_acquire);
     
     switch (currentState)
     {
@@ -356,36 +357,40 @@ void Looper::processAudioForCurrentState(juce::AudioBuffer<float>& buffer)
         {
             // Write input audio to the loop buffer
             loopBufferManager.writeAudio(buffer, 0, numSamples);
-            // During recording, mute the output to avoid feedback
-            // The user should monitor through Ableton's monitoring
-            buffer.clear();
+            // If passthrough enabled, keep input in buffer; otherwise mute
+            if (!passthrough)
+                buffer.clear();
             break;
         }
         
         case TransportController::State::Playing:
         {
-            // Read from loop buffer using sample-accurate position
             const int positionSamples = transportController.getPlaybackPositionSamples();
             const int loopLength = transportController.getLoopLength();
             
-            LOOPER_DBG("Playing: positionSamples=" << positionSamples << ", loopLength=" << loopLength);
-            
             if (loopLength > 0)
             {
-                // Calculate position within the loop (handle wrapping)
                 const int loopPosition = positionSamples % loopLength;
-                
-                LOOPER_DBG("  loopPosition=" << loopPosition);
-                
-                loopBufferManager.readAudio(buffer, 0, numSamples, loopPosition);
-                
-                // Apply volume control
                 const float volume = parameterManager.getVolumeLevel();
-                buffer.applyGain(volume);
+                
+                loopBuffer.setSize(buffer.getNumChannels(), numSamples, false, false, true);
+                loopBufferManager.readAudio(loopBuffer, 0, numSamples, loopPosition);
+                
+                if (passthrough)
+                {
+                    // Mix loop on top of input
+                    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                        buffer.addFrom(ch, 0, loopBuffer, ch, 0, numSamples, volume);
+                }
+                else
+                {
+                    // Replace buffer with loop content only
+                    buffer.makeCopyOf(loopBuffer);
+                    buffer.applyGain(volume);
+                }
             }
-            else
+            else if (!passthrough)
             {
-                LOOPER_DBG("  Loop length is 0, clearing buffer");
                 buffer.clear();
             }
             break;
@@ -393,15 +398,15 @@ void Looper::processAudioForCurrentState(juce::AudioBuffer<float>& buffer)
         
         case TransportController::State::Overdubbing:
         {
-            // Read existing loop content from current position
             const int positionSamples = transportController.getPlaybackPositionSamples();
             const int loopLength = transportController.getLoopLength();
             const int loopPosition = positionSamples % loopLength;
             
+            // Read existing loop content
             loopBuffer.setSize(buffer.getNumChannels(), numSamples, false, false, true);
             loopBufferManager.readAudio(loopBuffer, 0, numSamples, loopPosition);
             
-            // Save original loop content for output (before mixing in live input)
+            // Save loop content for output
             tempBuffer.setSize(buffer.getNumChannels(), numSamples, false, false, true);
             tempBuffer.makeCopyOf(loopBuffer);
             
@@ -412,22 +417,29 @@ void Looper::processAudioForCurrentState(juce::AudioBuffer<float>& buffer)
             // Write the mixed result back to the loop buffer
             loopBufferManager.writeBackAudio(loopBuffer, 0, numSamples, loopPosition);
             
-            // Output only the original loop content (before live input was mixed in)
-            buffer.makeCopyOf(tempBuffer);
-            
-            // Apply volume control
+            // Output: existing loop content (+ input passthrough if enabled)
             const float volume = parameterManager.getVolumeLevel();
-            buffer.applyGain(volume);
+            if (passthrough)
+            {
+                // Input already in buffer, add loop on top
+                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                    buffer.addFrom(ch, 0, tempBuffer, ch, 0, numSamples, volume);
+            }
+            else
+            {
+                // Output only loop content, no live input echo
+                buffer.makeCopyOf(tempBuffer);
+                buffer.applyGain(volume);
+            }
             break;
         }
         
         case TransportController::State::Stopped:
         default:
         {
-            // Clear output — looper has nothing to play. Input is only used
-            // during Recording/Overdubbing. This prevents feedback loops when
-            // the host routes input through the plugin (e.g. Ableton "Auto" monitoring).
-            buffer.clear();
+            // If passthrough disabled, silence output
+            if (!passthrough)
+                buffer.clear();
             break;
         }
     }

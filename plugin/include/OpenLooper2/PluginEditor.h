@@ -45,6 +45,9 @@ private:
     // Debug toggle
     juce::ToggleButton debugToggle{"DBG"};
     
+    // Monitor passthrough toggle
+    juce::ToggleButton monitorToggle{"Monitor"};
+    
     // Current state display
     juce::String currentStateText;
     float playbackPosition{0.0f};

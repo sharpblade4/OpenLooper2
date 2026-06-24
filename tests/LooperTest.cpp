@@ -404,12 +404,173 @@ void testStateMachine()
     END_TEST
 }
 
+void testMonitorPassthrough()
+{
+    std::cout << "=== Monitor Passthrough Tests ===" << std::endl;
+
+    const double sampleRate = 44100.0;
+    const int blockSize = 512;
+    const int numChannels = 2;
+    juce::MidiBuffer midi;
+
+    TEST("monitor OFF: stopped state outputs silence")
+        Looper looper;
+        looper.initialize(sampleRate, blockSize, numChannels);
+        looper.setMonitorPassthrough(false);
+
+        auto proc = createDummyProcessor();
+        juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "P", Looper::createParameterLayout());
+
+        juce::AudioBuffer<float> buf(numChannels, blockSize);
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                buf.setSample(ch, s, 0.8f);
+
+        looper.processBlock(buf, midi, apvts);
+
+        float peak = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                peak = std::max(peak, std::abs(buf.getSample(ch, s)));
+        EXPECT(peak < 0.001f);
+    END_TEST
+
+    TEST("monitor ON: stopped state passes through input")
+        Looper looper;
+        looper.initialize(sampleRate, blockSize, numChannels);
+        looper.setMonitorPassthrough(true);
+
+        auto proc = createDummyProcessor();
+        juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "P", Looper::createParameterLayout());
+
+        juce::AudioBuffer<float> buf(numChannels, blockSize);
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                buf.setSample(ch, s, 0.8f);
+
+        looper.processBlock(buf, midi, apvts);
+
+        float peak = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                peak = std::max(peak, std::abs(buf.getSample(ch, s)));
+        EXPECT_NEAR(peak, 0.8f, 0.01f);
+    END_TEST
+
+    TEST("monitor ON: playing state mixes loop with input")
+        Looper looper;
+        looper.initialize(sampleRate, blockSize, numChannels);
+        looper.setMonitorPassthrough(true);
+
+        auto proc = createDummyProcessor();
+        juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "P", Looper::createParameterLayout());
+
+        // Record a loop with signal 0.4
+        looper.triggerRecord();
+        for (int i = 0; i < 2; ++i)
+        {
+            juce::AudioBuffer<float> buf(numChannels, blockSize);
+            for (int ch = 0; ch < numChannels; ++ch)
+                for (int s = 0; s < blockSize; ++s)
+                    buf.setSample(ch, s, 0.4f);
+            looper.processBlock(buf, midi, apvts);
+        }
+        looper.triggerRecord();
+        {
+            juce::AudioBuffer<float> buf(numChannels, blockSize);
+            buf.clear();
+            looper.processBlock(buf, midi, apvts);
+        }
+
+        // Now playing — feed input of 0.3, expect output ≈ 0.3 + 0.4 = 0.7
+        juce::AudioBuffer<float> buf(numChannels, blockSize);
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                buf.setSample(ch, s, 0.3f);
+        looper.processBlock(buf, midi, apvts);
+
+        // Check output is greater than either input or loop alone
+        float minVal = 1.0f;
+        for (int s = 0; s < blockSize; ++s)
+            minVal = std::min(minVal, buf.getSample(0, s));
+        EXPECT(minVal > 0.5f); // must be more than just the input (0.3) or loop (0.4) alone
+    END_TEST
+
+    TEST("monitor ON: recording state passes through input")
+        Looper looper;
+        looper.initialize(sampleRate, blockSize, numChannels);
+        looper.setMonitorPassthrough(true);
+
+        auto proc = createDummyProcessor();
+        juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "P", Looper::createParameterLayout());
+
+        looper.triggerRecord();
+        juce::AudioBuffer<float> buf(numChannels, blockSize);
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                buf.setSample(ch, s, 0.6f);
+        looper.processBlock(buf, midi, apvts);
+
+        float peak = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                peak = std::max(peak, std::abs(buf.getSample(ch, s)));
+        EXPECT_NEAR(peak, 0.6f, 0.01f);
+    END_TEST
+
+    TEST("monitor OFF: overdub output does not contain live input")
+        Looper looper;
+        looper.initialize(sampleRate, blockSize, numChannels);
+        looper.setMonitorPassthrough(false);
+
+        auto proc = createDummyProcessor();
+        juce::AudioProcessorValueTreeState apvts(*proc, nullptr, "P", Looper::createParameterLayout());
+
+        // Record silence
+        looper.triggerRecord();
+        for (int i = 0; i < 4; ++i)
+        {
+            juce::AudioBuffer<float> buf(numChannels, blockSize);
+            buf.clear();
+            looper.processBlock(buf, midi, apvts);
+        }
+        looper.triggerRecord();
+        {
+            juce::AudioBuffer<float> buf(numChannels, blockSize);
+            buf.clear();
+            looper.processBlock(buf, midi, apvts);
+        }
+
+        // Overdub with loud signal
+        looper.triggerOverdub();
+        {
+            juce::AudioBuffer<float> buf(numChannels, blockSize);
+            buf.clear();
+            looper.processBlock(buf, midi, apvts);
+        }
+
+        juce::AudioBuffer<float> buf(numChannels, blockSize);
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                buf.setSample(ch, s, 0.75f);
+        looper.processBlock(buf, midi, apvts);
+
+        // Output should be near-silent (loop was silence, no passthrough)
+        float peak = 0.0f;
+        for (int ch = 0; ch < numChannels; ++ch)
+            for (int s = 0; s < blockSize; ++s)
+                peak = std::max(peak, std::abs(buf.getSample(ch, s)));
+        EXPECT(peak < 0.01f);
+    END_TEST
+}
+
 int main()
 {
     std::cout << "\n=== OpenLooper2 Looper Tests ===\n" << std::endl;
 
     testStateMachine();
     testOverdubNoFeedback();
+    testMonitorPassthrough();
 
     std::cout << "\n--- Results: " << testsPassed << "/" << testsRun << " passed ---" << std::endl;
     return (testsPassed == testsRun) ? 0 : 1;

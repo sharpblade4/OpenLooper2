@@ -101,6 +101,10 @@ public:
     void setDebugEnabled(bool enabled) { debugEnabled.store(enabled, std::memory_order_release); }
     bool isDebugEnabled() const { return debugEnabled.load(std::memory_order_acquire); }
 
+    /** Toggle monitor passthrough (input audio passes through to output). Off by default to prevent feedback. */
+    void setMonitorPassthrough(bool enabled) { monitorPassthrough.store(enabled, std::memory_order_release); }
+    bool isMonitorPassthrough() const { return monitorPassthrough.load(std::memory_order_acquire); }
+
     /**
      * Compute waveform peaks from the loop buffer for UI display.
      * Call from UI thread, not audio thread.
@@ -142,6 +146,7 @@ private:
     std::atomic<bool> oneLoopOverdubArmed{false};  // waiting for loop start
     std::atomic<bool> oneLoopOverdubActive{false}; // overdubbing for one loop
     std::atomic<bool> debugEnabled{false};
+    std::atomic<bool> monitorPassthrough{false};
     
     // File chooser kept alive during async save
     std::unique_ptr<juce::FileChooser> fileChooser;

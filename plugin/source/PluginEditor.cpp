@@ -61,6 +61,13 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAud
     };
     addAndMakeVisible(debugToggle);
     
+    // Monitor passthrough toggle
+    monitorToggle.onClick = [this]() {
+        if (processorRef.looper)
+            processorRef.looper->setMonitorPassthrough(monitorToggle.getToggleState());
+    };
+    addAndMakeVisible(monitorToggle);
+    
     startTimerHz(30);
     setSize(600, 440);
 }
@@ -171,6 +178,7 @@ void AudioPluginAudioProcessorEditor::resized()
     
     // Debug toggle in top-right
     debugToggle.setBounds(bounds.getWidth() - 70, 10, 60, 24);
+    monitorToggle.setBounds(bounds.getWidth() - 160, 10, 80, 24);
     
     bounds.removeFromTop(120); // Space for title and state indicator
     
