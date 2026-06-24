@@ -174,45 +174,66 @@ void Looper::handleTransportControls()
     
     const auto state = transportController.getCurrentState();
     
-    // --- 1-LOOP OVERDUB button ---
+    // --- 1-LOOP OVERDUB button (with decomposed flags) ---
     if (oneLoopOverdubPressed)
     {
         const int loopLength = transportController.getLoopLength();
         if (loopLength > 0 && (state == TransportController::State::Playing || state == TransportController::State::Stopped))
         {
-            // Arm: will start overdubbing at next loop boundary
-            oneLoopOverdubArmed.store(true, std::memory_order_release);
-            oneLoopOverdubActive.store(false, std::memory_order_release);
-            // Ensure playback is running
-            if (state == TransportController::State::Stopped)
-                transportController.startPlayback();
-            LOOPER_DBG("1-Loop Overdub armed, waiting for loop start");
+            const bool waitForBegin = pendingWaitLoopBegin.exchange(false, std::memory_order_acq_rel);
+            const bool oneLoop = pendingOneLoopRecord.exchange(false, std::memory_order_acq_rel);
+            
+            if (waitForBegin)
+            {
+                // Arm: will start overdubbing at next loop boundary
+                oneLoopOverdubArmed.store(true, std::memory_order_release);
+                oneLoopOverdubActive.store(false, std::memory_order_release);
+            }
+            else
+            {
+                // Start overdub immediately
+                oneLoopOverdubArmed.store(false, std::memory_order_release);
+                oneLoopOverdubActive.store(oneLoop, std::memory_order_release);
+                if (state == TransportController::State::Stopped)
+                    transportController.startPlayback();
+                transportController.startOverdub();
+                LOOPER_DBG("Overdub started immediately, oneLoop=" << (int)oneLoop);
+            }
+            
+            // Store oneLoop flag for use when armed overdub starts
+            if (waitForBegin)
+            {
+                // Stash the oneLoop preference for when armed overdub triggers
+                pendingOneLoopRecord.store(oneLoop, std::memory_order_release);
+                if (state == TransportController::State::Stopped)
+                    transportController.startPlayback();
+                LOOPER_DBG("Overdub armed (waitLoopBegin), oneLoop=" << (int)oneLoop);
+            }
         }
     }
     
     // --- 1-LOOP OVERDUB state machine ---
     if (oneLoopOverdubArmed.load(std::memory_order_acquire))
     {
-        // Check if we're at (or just crossed) the loop start
         const int pos = transportController.getPlaybackPositionSamples();
         if (pos < samplesPerBlock)  // near loop start
         {
             oneLoopOverdubArmed.store(false, std::memory_order_release);
-            oneLoopOverdubActive.store(true, std::memory_order_release);
+            const bool oneLoop = pendingOneLoopRecord.exchange(false, std::memory_order_acq_rel);
+            oneLoopOverdubActive.store(oneLoop, std::memory_order_release);
             transportController.startOverdub();
-            LOOPER_DBG("1-Loop Overdub: started at loop boundary, pos=" << pos);
+            LOOPER_DBG("Armed overdub started at loop boundary, oneLoop=" << (int)oneLoop);
         }
     }
     else if (oneLoopOverdubActive.load(std::memory_order_acquire))
     {
-        // Check if we've reached/crossed the loop end (position wrapped back to start)
         const int pos = transportController.getPlaybackPositionSamples();
         if (pos < samplesPerBlock)  // wrapped back to start
         {
             oneLoopOverdubActive.store(false, std::memory_order_release);
             transportController.stopOverdub();
             waveformNeedsUpdate.store(true, std::memory_order_release);
-            LOOPER_DBG("1-Loop Overdub: finished, pos=" << pos);
+            LOOPER_DBG("One-loop overdub finished");
         }
     }
     

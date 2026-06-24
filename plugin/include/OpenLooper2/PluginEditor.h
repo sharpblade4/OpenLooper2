@@ -19,17 +19,19 @@ public:
     void buttonClicked (juce::Button* button) override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
     AudioPluginAudioProcessor& processorRef;
     
-    // Transport control buttons
-    juce::TextButton recordButton;
+    // Main control: context-sensitive Record/Overdub
+    juce::TextButton recordOverdubButton;
+    
+    // Overdub modifier checkboxes
+    juce::ToggleButton waitLoopBeginToggle{"Wait Loop Begin"};
+    juce::ToggleButton oneLoopRecordToggle{"One Loop Record"};
+    
+    // Secondary transport buttons
     juce::TextButton playButton;
     juce::TextButton stopButton;
-    juce::TextButton overdubButton;
     juce::TextButton exportButton;
-    juce::TextButton oneLoopOverdubButton;
     
     // Sliders for continuous parameters
     juce::Slider feedbackSlider;

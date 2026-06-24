@@ -10,37 +10,29 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAud
     : AudioProcessorEditor(p), 
     processorRef(p)
 {
-    // Set up Record button
-    recordButton.setButtonText("Record");
-    recordButton.addListener(this);
-    addAndMakeVisible(recordButton);
+    // Main Record/Overdub button
+    recordOverdubButton.setButtonText("Record");
+    recordOverdubButton.addListener(this);
+    addAndMakeVisible(recordOverdubButton);
     
-    // Set up Play button
+    // Overdub modifier checkboxes
+    addAndMakeVisible(waitLoopBeginToggle);
+    addAndMakeVisible(oneLoopRecordToggle);
+    
+    // Secondary transport buttons
     playButton.setButtonText("Play");
     playButton.addListener(this);
     addAndMakeVisible(playButton);
     
-    // Set up Stop button
     stopButton.setButtonText("Stop");
     stopButton.addListener(this);
     addAndMakeVisible(stopButton);
     
-    // Set up Overdub button
-    overdubButton.setButtonText("Overdub");
-    overdubButton.addListener(this);
-    addAndMakeVisible(overdubButton);
-    
-    // Set up Export button
     exportButton.setButtonText("Export");
     exportButton.addListener(this);
     addAndMakeVisible(exportButton);
     
-    // Set up 1-Loop Overdub button
-    oneLoopOverdubButton.setButtonText("1-Loop OD");
-    oneLoopOverdubButton.addListener(this);
-    addAndMakeVisible(oneLoopOverdubButton);
-    
-    // Set up Feedback slider
+    // Feedback slider
     feedbackSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     feedbackSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
     addAndMakeVisible(feedbackSlider);
@@ -51,7 +43,7 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAud
     feedbackLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(feedbackLabel);
     
-    // Set up Volume slider
+    // Volume slider
     volumeSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     volumeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 80, 20);
     addAndMakeVisible(volumeSlider);
@@ -62,9 +54,6 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAud
     volumeLabel.setJustificationType(juce::Justification::centred);
     addAndMakeVisible(volumeLabel);
     
-    // Start timer for UI updates (30 Hz)
-    startTimerHz(30);
-    
     // Debug toggle
     debugToggle.onClick = [this]() {
         if (processorRef.looper)
@@ -72,18 +61,17 @@ AudioPluginAudioProcessorEditor::AudioPluginAudioProcessorEditor (AudioPluginAud
     };
     addAndMakeVisible(debugToggle);
     
+    startTimerHz(30);
     setSize(600, 440);
 }
 
 AudioPluginAudioProcessorEditor::~AudioPluginAudioProcessorEditor()
 {
     stopTimer();
-    recordButton.removeListener(this);
+    recordOverdubButton.removeListener(this);
     playButton.removeListener(this);
     stopButton.removeListener(this);
-    overdubButton.removeListener(this);
     exportButton.removeListener(this);
-    oneLoopOverdubButton.removeListener(this);
 }
 
 void AudioPluginAudioProcessorEditor::buttonClicked(juce::Button* button)
@@ -91,23 +79,47 @@ void AudioPluginAudioProcessorEditor::buttonClicked(juce::Button* button)
     if (!processorRef.looper || !processorRef.looper->isInitialized())
         return;
     
-    if (button == &recordButton)
-        processorRef.looper->triggerRecord();
+    if (button == &recordOverdubButton)
+    {
+        const auto& transport = processorRef.looper->getTransportController();
+        const auto state = transport.getCurrentState();
+        
+        if (state == OpenLooper2::TransportController::State::Stopped)
+        {
+            // Stopped → Record from scratch
+            processorRef.looper->triggerRecord();
+        }
+        else if (state == OpenLooper2::TransportController::State::Recording)
+        {
+            // Recording → stop recording, start playing
+            processorRef.looper->triggerRecord();
+        }
+        else if (state == OpenLooper2::TransportController::State::Playing)
+        {
+            // Playing → start overdub (with checkbox modifiers)
+            if (waitLoopBeginToggle.getToggleState() || oneLoopRecordToggle.getToggleState())
+                processorRef.looper->triggerOneLoopOverdub(
+                    waitLoopBeginToggle.getToggleState(),
+                    oneLoopRecordToggle.getToggleState());
+            else
+                processorRef.looper->triggerOverdub();
+        }
+        else if (state == OpenLooper2::TransportController::State::Overdubbing)
+        {
+            // Overdubbing → stop overdub, continue playing
+            processorRef.looper->triggerOverdub();
+        }
+    }
     else if (button == &playButton)
         processorRef.looper->triggerPlay();
     else if (button == &stopButton)
         processorRef.looper->triggerStop();
-    else if (button == &overdubButton)
-        processorRef.looper->triggerOverdub();
     else if (button == &exportButton)
         processorRef.looper->exportLoop();
-    else if (button == &oneLoopOverdubButton)
-        processorRef.looper->triggerOneLoopOverdub();
 }
 
 void AudioPluginAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    // Background
     g.fillAll(juce::Colour(0xff2a2a2a));
     
     // Title
@@ -132,26 +144,23 @@ void AudioPluginAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont(18.0f);
     g.drawText(currentStateText, getWidth() / 2 - 100, 60, 200, 40, juce::Justification::centred);
     
-    // Input level meter (shows if plugin is receiving audio)
+    // Input level meter
     if (processorRef.looper && processorRef.looper->isInitialized())
     {
         float level = processorRef.looper->inputLevel.load(std::memory_order_acquire);
-        // Draw a small horizontal bar
         auto meterBounds = juce::Rectangle<float>(20.0f, 105.0f, 200.0f, 12.0f);
         g.setColour(juce::Colour(0xff333333));
         g.fillRect(meterBounds);
-        // Fill based on level
         float fillWidth = juce::jmin(level, 1.0f) * meterBounds.getWidth();
         g.setColour(level > 0.01f ? juce::Colours::limegreen : juce::Colours::darkgrey);
         g.fillRect(meterBounds.getX(), meterBounds.getY(), fillWidth, meterBounds.getHeight());
-        // Label
         g.setColour(juce::Colours::white.withAlpha(0.6f));
         g.setFont(10.0f);
         g.drawText("IN: " + juce::String(level, 3), meterBounds.translated(205.0f, 0.0f).withWidth(80.0f), 
                    juce::Justification::centredLeft);
     }
     
-    // Waveform visualization area - now at the bottom with more space
+    // Waveform visualization area
     auto waveformBounds = juce::Rectangle<int>(20, 300, getWidth() - 40, 120);
     drawWaveformArea(g, waveformBounds);
 }
@@ -165,22 +174,24 @@ void AudioPluginAudioProcessorEditor::resized()
     
     bounds.removeFromTop(120); // Space for title and state indicator
     
-    // Transport buttons area
-    auto buttonArea = bounds.removeFromTop(80);
-    buttonArea.reduce(20, 10);
+    // Main row: large Record/Overdub button + checkboxes
+    auto mainRow = bounds.removeFromTop(60);
+    mainRow.reduce(20, 5);
+    recordOverdubButton.setBounds(mainRow.removeFromLeft(160));
+    mainRow.removeFromLeft(20);
+    auto checkboxArea = mainRow.removeFromLeft(200);
+    waitLoopBeginToggle.setBounds(checkboxArea.removeFromTop(28));
+    oneLoopRecordToggle.setBounds(checkboxArea);
     
-    const int buttonWidth = (buttonArea.getWidth() - 50) / 6;
-    recordButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
-    buttonArea.removeFromLeft(10);
-    playButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
-    buttonArea.removeFromLeft(10);
-    stopButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
-    buttonArea.removeFromLeft(10);
-    overdubButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
-    buttonArea.removeFromLeft(10);
-    oneLoopOverdubButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
-    buttonArea.removeFromLeft(10);
-    exportButton.setBounds(buttonArea.removeFromLeft(buttonWidth));
+    // Secondary row: smaller Play/Stop/Export
+    auto secondaryRow = bounds.removeFromTop(36);
+    secondaryRow.reduce(20, 4);
+    const int smallBtnWidth = 80;
+    playButton.setBounds(secondaryRow.removeFromLeft(smallBtnWidth));
+    secondaryRow.removeFromLeft(10);
+    stopButton.setBounds(secondaryRow.removeFromLeft(smallBtnWidth));
+    secondaryRow.removeFromLeft(10);
+    exportButton.setBounds(secondaryRow.removeFromLeft(smallBtnWidth));
     
     // Sliders area
     bounds.removeFromTop(10);
@@ -198,18 +209,12 @@ void AudioPluginAudioProcessorEditor::resized()
     auto volumeArea = sliderArea.removeFromLeft(sliderWidth);
     volumeLabel.setBounds(volumeArea.removeFromTop(20));
     volumeSlider.setBounds(volumeArea);
-    
-    // Waveform area is now at the bottom with more space
-    // (will be drawn in paint method)
 }
 
 void AudioPluginAudioProcessorEditor::timerCallback()
 {
-    // Check if waveform needs recomputing (deferred from audio thread)
     if (processorRef.looper && processorRef.looper->waveformNeedsUpdate.exchange(false, std::memory_order_acq_rel))
-    {
         processorRef.looper->updateWaveformDisplay();
-    }
     
     updateButtonStates();
     repaint();
@@ -217,45 +222,41 @@ void AudioPluginAudioProcessorEditor::timerCallback()
 
 void AudioPluginAudioProcessorEditor::updateButtonStates()
 {
-    // Get current looper state
     if (processorRef.looper && processorRef.looper->isInitialized())
     {
         const auto& transport = processorRef.looper->getTransportController();
         const auto state = transport.getCurrentState();
         
-        // Update playback position
         playbackPosition = transport.getPlaybackPosition();
         
-        // Update button toggle states to show which is active
-        recordButton.setToggleState(state == OpenLooper2::TransportController::State::Recording, 
-                                    juce::dontSendNotification);
-        playButton.setToggleState(state == OpenLooper2::TransportController::State::Playing, 
-                                  juce::dontSendNotification);
-        overdubButton.setToggleState(state == OpenLooper2::TransportController::State::Overdubbing, 
-                                     juce::dontSendNotification);
-        stopButton.setToggleState(state == OpenLooper2::TransportController::State::Stopped, 
-                                  juce::dontSendNotification);
-        oneLoopOverdubButton.setToggleState(processorRef.looper->isOneLoopOverdubArmed(),
-                                            juce::dontSendNotification);
-        
+        // Update Record/Overdub button text and toggle state based on context
         switch (state)
         {
             case OpenLooper2::TransportController::State::Stopped:
-                if (processorRef.looper->isMidiMode() && processorRef.looper->getMidiLooper().isArmed())
-                    currentStateText = "Armed";
-                else
-                    currentStateText = "Stopped";
+                recordOverdubButton.setButtonText("Record");
+                recordOverdubButton.setToggleState(false, juce::dontSendNotification);
+                currentStateText = processorRef.looper->isMidiMode() && processorRef.looper->getMidiLooper().isArmed()
+                    ? "Armed" : "Stopped";
                 break;
             case OpenLooper2::TransportController::State::Recording:
+                recordOverdubButton.setButtonText("Recording...");
+                recordOverdubButton.setToggleState(true, juce::dontSendNotification);
                 currentStateText = "Recording";
                 break;
             case OpenLooper2::TransportController::State::Playing:
+                recordOverdubButton.setButtonText("Overdub");
+                recordOverdubButton.setToggleState(false, juce::dontSendNotification);
                 currentStateText = "Playing";
                 break;
             case OpenLooper2::TransportController::State::Overdubbing:
+                recordOverdubButton.setButtonText("Overdubbing...");
+                recordOverdubButton.setToggleState(true, juce::dontSendNotification);
                 currentStateText = "Overdubbing";
                 break;
         }
+        
+        playButton.setToggleState(state == OpenLooper2::TransportController::State::Playing, juce::dontSendNotification);
+        stopButton.setToggleState(state == OpenLooper2::TransportController::State::Stopped, juce::dontSendNotification);
     }
     else
     {
@@ -282,27 +283,22 @@ juce::Colour AudioPluginAudioProcessorEditor::getStateColour() const
 
 void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::Rectangle<int> bounds)
 {
-    // In MIDI mode, draw piano roll instead
     if (processorRef.looper && processorRef.looper->isMidiMode())
     {
         drawPianoRoll(g, bounds);
         return;
     }
-    // Draw background
+    
     g.setColour(juce::Colour(0xff1a1a1a));
     g.fillRoundedRectangle(bounds.toFloat(), 5.0f);
-    
-    // Draw border
     g.setColour(juce::Colour(0xff404040));
     g.drawRoundedRectangle(bounds.toFloat(), 5.0f, 2.0f);
     
-    // Draw center line
-    g.setColour(juce::Colour(0xff303030));
     const float centerY = static_cast<float>(bounds.getCentreY());
+    g.setColour(juce::Colour(0xff303030));
     g.drawLine(static_cast<float>(bounds.getX()), centerY, 
                static_cast<float>(bounds.getRight()), centerY, 1.0f);
     
-    // Draw actual recorded waveform
     if (processorRef.looper && processorRef.looper->isInitialized())
     {
         const int numBins = processorRef.looper->waveformLength.load(std::memory_order_acquire);
@@ -310,7 +306,6 @@ void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::
         if (numBins > 0)
         {
             g.setColour(getStateColour().withAlpha(0.7f));
-            
             const float width = static_cast<float>(bounds.getWidth());
             const float halfHeight = static_cast<float>(bounds.getHeight()) * 0.45f;
             
@@ -322,21 +317,18 @@ void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::
                 const float barHeight = peak * halfHeight;
                 
                 if (barHeight > 0.5f)
-                {
                     g.fillRect(x, centerY - barHeight, barWidth * 0.8f, barHeight * 2.0f);
-                }
             }
         }
         else
         {
-            // No loop recorded — show hint
             g.setColour(juce::Colours::white.withAlpha(0.3f));
             g.setFont(14.0f);
             g.drawText("No loop recorded", bounds, juce::Justification::centred);
         }
     }
     
-    // Draw playback position indicator
+    // Playback position indicator
     if (processorRef.looper && processorRef.looper->isInitialized())
     {
         const auto& transport = processorRef.looper->getTransportController();
@@ -345,14 +337,13 @@ void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::
         if (state != OpenLooper2::TransportController::State::Stopped && playbackPosition > 0.0f)
         {
             const float posX = static_cast<float>(bounds.getX()) + playbackPosition * static_cast<float>(bounds.getWidth());
-            
             g.setColour(juce::Colours::white.withAlpha(0.9f));
             g.drawLine(posX, static_cast<float>(bounds.getY()), 
                        posX, static_cast<float>(bounds.getBottom()), 2.0f);
         }
     }
     
-    // State label
+    // Loop length label
     g.setColour(juce::Colours::white.withAlpha(0.5f));
     g.setFont(11.0f);
     if (processorRef.looper && processorRef.looper->isInitialized())
@@ -368,7 +359,6 @@ void AudioPluginAudioProcessorEditor::drawWaveformArea(juce::Graphics& g, juce::
 
 void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rectangle<int> bounds)
 {
-    // Background
     g.setColour(juce::Colour(0xff1a1a1a));
     g.fillRoundedRectangle(bounds.toFloat(), 5.0f);
     g.setColour(juce::Colour(0xff404040));
@@ -382,7 +372,6 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
     const auto& events = loopBuffer.getEvents();
     const double loopLen = loopBuffer.getLoopLengthBeats();
 
-    // Show armed status
     if (midiLooper.isArmed())
     {
         g.setColour(juce::Colours::yellow.withAlpha(0.7f));
@@ -399,7 +388,6 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
         return;
     }
 
-    // Find note range for vertical scaling
     int minNote = 127, maxNote = 0;
     for (const auto& event : events)
     {
@@ -409,10 +397,8 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
             maxNote = juce::jmax(maxNote, event.message.getNoteNumber());
         }
     }
-
     if (minNote > maxNote) return;
 
-    // Add padding to note range
     minNote = juce::jmax(0, minNote - 2);
     maxNote = juce::jmin(127, maxNote + 2);
     const int noteRange = maxNote - minNote + 1;
@@ -421,7 +407,6 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
     const float h = static_cast<float>(bounds.getHeight());
     const float noteHeight = h / static_cast<float>(noteRange);
 
-    // Draw horizontal grid lines (semitones)
     g.setColour(juce::Colour(0xff252525));
     for (int n = minNote; n <= maxNote; ++n)
     {
@@ -429,10 +414,7 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
         g.drawHorizontalLine(static_cast<int>(y), static_cast<float>(bounds.getX()), static_cast<float>(bounds.getRight()));
     }
 
-    // Draw note blocks
-    g.setColour(juce::Colours::cyan.withAlpha(0.8f));
     const float minNoteWidth = 4.0f;
-
     for (const auto& event : events)
     {
         if (!event.message.isNoteOn()) continue;
@@ -440,7 +422,6 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
         float x = bounds.getX() + static_cast<float>(event.ppqPosition / loopLen) * w;
         float y = bounds.getY() + h - (static_cast<float>(event.message.getNoteNumber() - minNote + 1) * noteHeight);
 
-        // Find matching note-off to determine width
         float noteW = minNoteWidth;
         for (const auto& offEvent : events)
         {
@@ -454,7 +435,6 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
             }
         }
 
-        // Velocity as brightness
         float alpha = 0.4f + 0.6f * (event.message.getVelocity() / 127.0f);
         g.setColour(juce::Colours::cyan.withAlpha(alpha));
         g.fillRect(x, y, noteW, juce::jmax(2.0f, noteHeight - 1.0f));
@@ -470,7 +450,6 @@ void AudioPluginAudioProcessorEditor::drawPianoRoll(juce::Graphics& g, juce::Rec
                    posX, static_cast<float>(bounds.getBottom()), 2.0f);
     }
 
-    // Loop length label
     g.setColour(juce::Colours::white.withAlpha(0.5f));
     g.setFont(11.0f);
     g.drawText(juce::String(loopLen, 1) + " beats", bounds.reduced(5), juce::Justification::topRight);

@@ -82,7 +82,11 @@ public:
     void triggerPlay()   { pendingPlay.store(true, std::memory_order_release); }
     void triggerStop()   { pendingStop.store(true, std::memory_order_release); }
     void triggerOverdub(){ pendingOverdub.store(true, std::memory_order_release); }
-    void triggerOneLoopOverdub() { pendingOneLoopOverdub.store(true, std::memory_order_release); }
+    void triggerOneLoopOverdub(bool waitForBegin, bool oneLoop) { 
+        pendingWaitLoopBegin.store(waitForBegin, std::memory_order_release);
+        pendingOneLoopRecord.store(oneLoop, std::memory_order_release);
+        pendingOneLoopOverdub.store(true, std::memory_order_release); 
+    }
 
     /**
      * Export the current loop as a WAV file.
@@ -133,6 +137,8 @@ private:
     std::atomic<bool> pendingStop{false};
     std::atomic<bool> pendingOverdub{false};
     std::atomic<bool> pendingOneLoopOverdub{false};
+    std::atomic<bool> pendingWaitLoopBegin{false};
+    std::atomic<bool> pendingOneLoopRecord{false};
     std::atomic<bool> oneLoopOverdubArmed{false};  // waiting for loop start
     std::atomic<bool> oneLoopOverdubActive{false}; // overdubbing for one loop
     std::atomic<bool> debugEnabled{false};
